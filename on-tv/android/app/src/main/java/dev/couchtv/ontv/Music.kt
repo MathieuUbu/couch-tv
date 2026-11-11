@@ -55,14 +55,26 @@ object Music {
         return item
     }
 
-    /** The album picture from Apple's free iTunes search (no key), once per song. */
-    private fun lookup(artist: String?, title: String?): String = try {
+    /**
+     * The album picture, once per song: Apple's free iTunes search first, then Deezer's free search
+     * (no key either) when Apple has no match. Apple knew none of a French rapper's titles (Vald,
+     * Damso on Spotify) while Deezer had them all, so the card showed a bare note for every song.
+     */
+    private fun lookup(artist: String?, title: String?): String {
         val q = URLEncoder.encode("${artist ?: ""} ${title ?: ""}".trim(), "UTF-8")
-        val c = URL("https://itunes.apple.com/search?entity=song&limit=1&term=$q").openConnection() as HttpURLConnection
+        val apple = fetchJson("https://itunes.apple.com/search?entity=song&limit=1&term=$q")
+            ?.optJSONArray("results")?.optJSONObject(0)?.optString("artworkUrl100")?.takeIf { it.isNotEmpty() }
+            ?.replace("100x100bb", "600x600bb")
+        if (apple != null) return apple
+        return fetchJson("https://api.deezer.com/search?limit=1&q=$q")
+            ?.optJSONArray("data")?.optJSONObject(0)?.optJSONObject("album")
+            ?.let { it.optString("cover_big").ifEmpty { it.optString("cover_medium") } }?.takeIf { it.isNotEmpty() } ?: ""
+    }
+
+    private fun fetchJson(url: String): JSONObject? = try {
+        val c = URL(url).openConnection() as HttpURLConnection
         c.connectTimeout = 6000; c.readTimeout = 6000
         c.setRequestProperty("User-Agent", "couch-tv-ontv/1")
-        val j = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
-        j.optJSONArray("results")?.optJSONObject(0)?.optString("artworkUrl100")?.takeIf { it.isNotEmpty() }
-            ?.replace("100x100bb", "600x600bb") ?: ""
-    } catch (e: Exception) { "" }
+        try { JSONObject(c.inputStream.bufferedReader().use { it.readText() }) } finally { c.disconnect() }
+    } catch (e: Exception) { null }
 }

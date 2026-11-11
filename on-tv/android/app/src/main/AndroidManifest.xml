@@ -67,6 +67,15 @@
             </intent-filter>
         </activity>
 
+        <!-- Invisible: only starts the server, for the couch-tv home to call when the server stopped (TCL, see WakeActivity.kt). -->
+        <activity
+            android:name=".WakeActivity"
+            android:exported="true"
+            android:theme="@style/Couch.Invisible"
+            android:taskAffinity=""
+            android:noHistory="true"
+            android:excludeFromRecents="true" />
+
         <!-- The home screen page. Reachable as a normal screen; it is HOME only through the alias below. -->
         <activity
             android:name=".HomeActivity"

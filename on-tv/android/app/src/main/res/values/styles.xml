@@ -6,4 +6,10 @@
         <item name="android:colorBackground">@color/ground</item>
         <item name="android:windowShowWallpaper">false</item>
     </style>
+    <!-- WakeActivity: nothing on screen, no animation, the home stays visible behind it. -->
+    <style name="Couch.Invisible" parent="android:Theme.Translucent.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 </resources>

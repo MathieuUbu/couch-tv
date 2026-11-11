@@ -38,6 +38,8 @@
         <package android:name="com.amazon.tv.launcher" />
         <package android:name="com.google.android.apps.tv.launcherx" />
         <package android:name="com.google.android.tvlauncher" />
+        <!-- The on-TV app (option C): the home wakes its server when it stopped (wakeOnTv in MainActivity.kt). -->
+        <package android:name="dev.couchtv.ontv" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.HOME" />

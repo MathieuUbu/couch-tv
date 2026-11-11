@@ -181,11 +181,13 @@ class MainActivity : Activity() {
         } else if (offline || fallback != null) connect()
         io.execute { warmApps() }
         Updater.resumed(this)   // the daily look for a new release (Home settings, Updates)
+        main.postDelayed(onTvCheck, 5_000L)   // option C: wake the on-TV app if its server stopped
     }
 
     override fun onPause() {
         super.onPause()
         resumed = false
+        main.removeCallbacks(onTvCheck)
         try {
             val lp = window.attributes
             if (lp.screenBrightness == 0.0f) {
@@ -286,9 +288,11 @@ class MainActivity : Activity() {
                 } else if (hasOffline()) {
                     if (!offline) showOffline()
                     later(OFFLINE_RETRY_MS)
+                    wakeOnTv()   // option C: the on-TV app's server may simply have been stopped
                 } else {
                     showFallback()
                     later(RETRY_MS)
+                    wakeOnTv()
                 }
             }
         }
@@ -297,6 +301,49 @@ class MainActivity : Activity() {
     private fun later(ms: Long) {
         main.removeCallbacks(retry)
         main.postDelayed(retry, ms)
+    }
+
+    // ---------------------------------------------------------------- the on-TV app's server (option C)
+
+    private var lastWake = 0L
+
+    /** The bridge is the on-TV app on this same TV (127.0.0.1 or localhost), not a computer. */
+    private fun bridgeIsOnTv(): Boolean {
+        val b = prefs.getString("bridge", null) ?: return false
+        val host = runCatching { Uri.parse(b).host }.getOrNull() ?: return false
+        return host == "127.0.0.1" || host == "localhost"
+    }
+
+    /**
+     * Wakes the on-TV app when its server stopped. On a TCL Google TV, TCL's boot manager refuses
+     * startForeground to that app's service whenever it starts from the background (after an update,
+     * or when Android restarts it), and Android then kills it ten seconds later with nothing to bring
+     * it back: the home loses weather, Keep watching and Now playing. Opened from here, with this
+     * home in front, its invisible WakeActivity is allowed to start the service. At most once a
+     * minute, and only for the on-TV bridge, never for a computer.
+     */
+    private fun wakeOnTv() {
+        if (!bridgeIsOnTv() || !resumed) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (lastWake != 0L && now - lastWake < ONTV_WAKE_GAP_MS) return
+        lastWake = now
+        runCatching {
+            startActivity(Intent().setClassName(ONTV_PKG, "$ONTV_PKG.WakeActivity")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION))
+            android.util.Log.i("couchtv", "on-TV server not answering: woke $ONTV_PKG")
+            main.postDelayed({ if (offline || !pageReady) connect() }, 8_000L)
+        }.onFailure { android.util.Log.w("couchtv", "could not wake $ONTV_PKG: ${it.message}") }
+    }
+
+    /** While the home is on screen: look at the on-TV server now and then, wake it if it stopped. */
+    private val onTvCheck: Runnable = object : Runnable {
+        override fun run() {
+            main.removeCallbacks(this)
+            if (!resumed || !bridgeIsOnTv()) return
+            val base = prefs.getString("bridge", null) ?: return
+            io.execute { if (!reachable(base)) main.post { wakeOnTv() } }
+            main.postDelayed(this, ONTV_CHECK_MS)
+        }
     }
 
     private fun reachable(base: String): Boolean = try {
@@ -1535,6 +1582,9 @@ class MainActivity : Activity() {
         private const val MAX_PHOTOS = 50   // same as MAX_PHOTOS in tv-home/web/app.js and bridge/server.py
         private const val RETRY_MS = 15_000L
         private const val OFFLINE_RETRY_MS = 60_000L   // looking for the bridge while the saved copy shows
+        private const val ONTV_PKG = "dev.couchtv.ontv"
+        private const val ONTV_CHECK_MS = 45_000L   // how often the home checks the on-TV app's server while on screen
+        private const val ONTV_WAKE_GAP_MS = 60_000L   // at most one wake a minute
         private const val OFFLINE_HOST = "home.tvos.invalid"
         private const val BUNDLED = "www/tv"   // the built-in copy, in the app's assets
         private const val SLOW_MS = 2_500L

@@ -60,12 +60,9 @@ The round buttons at the top right of the home. Any of these, in the order you l
 | `headphones` | Opens the TV's own Bluetooth settings screen, where headphones are paired and picked. Nothing is read from the request and no device addresses leave the bridge. Not in the default buttons. | The bridge and ADB, or the TV home launcher or on-TV app |
 | `screen_off` | Audio-only / Screen off mode: turns off the display (pitch black canvas for OLEDs and drops hardware backlight on Android TV) while sleep soundscapes, Spotify, and sleep timers keep playing in the dark. Pressing any button on the remote wakes the screen and is absorbed so no unwanted actions occur. | Nothing |
 | `input` | couch-tv's own Input menu: the HDMI ports and other inputs Android lists for the TV, by the TV's own names (ARC or eARC shows where the TV's label says so; Android has no public way to read it), with the devices HDMI-CEC found behind each, then Bluetooth and Network. OK switches straight to that input. A TV that lists no inputs keeps today's behaviour: with the bridge it presses the TV's Input key (`KEYCODE_TV_INPUT`); with no bridge the launcher opens the TV's own input screen if it has one. | The TV home launcher, the bridge, or a TV with an input screen |
-| `screensaver` | Starts the TV's own screensaver: Google TV's Ambient mode, with the Google Photos
-albums. Android only lets the system start a dream, so the button cuts the screen timeout to a few
-seconds and nudges the idle timer until the TV naps by itself; the photos then come up a few seconds
-later and the timeout goes back to what it was the moment the screensaver covers the home. A second
-press can never leave the TV on the short timeout. | The TV home app on an Android TV or Google TV,
-and the "modify system settings" app-op that `apply.sh` grants |
+| `bluetooth` | Opens the TV's own Bluetooth settings (speakers, headphones and controllers). Not in the default buttons. | The on-TV app (option C) |
+| `network` | Opens the TV's own network settings (Wi-Fi and the network). Not in the default buttons. | The on-TV app (option C) |
+| `screensaver` | Starts the TV's own screensaver: Google TV's Ambient mode, with the Google Photos albums. Android only lets the system start a dream, so the button cuts the screen timeout to a few seconds and nudges the idle timer until the TV naps by itself; the photos then come up a few seconds later and the timeout goes back to what it was the moment the screensaver covers the home. A second press can never leave the TV on the short timeout. | The TV home app on an Android TV or Google TV, and the "modify system settings" app-op that `apply.sh` grants |
 
 A button that cannot work right now is left out, the same way the sleep timer always disappeared
 when the computer was off. With no bridge at all (option A), only `look` shows, plus `input` on
@@ -165,6 +162,7 @@ Home settings saves to the same `bridge/data/people.json` the phone uses.
   "look": "night",
   "scenes": ["night", "golden", "water", "fog", "dawn"],
   "scene_seconds": 20,
+  "idle_photo_seconds": 0,
   "clock": "12h",
   "dock_size": 10,
   "hide_packages": [],
@@ -179,6 +177,7 @@ Home settings saves to the same `bridge/data/people.json` the phone uses.
 | `my_scenes` [none] | Your own scenes from any photo, each with its clock designed: where it sits, its size and font, the date above or below it, light or dark text, and `cutout` for the skyline in front of the clock. Made with `tv-home/tools/make-scene.py`; [MAKE-A-SCENE.md](MAKE-A-SCENE.md) has every key. They take turns after the scenes in `scenes` unless they are listed there. Option A needs the app rebuilt with the scene's pictures inside (that guide says how). |
 | `scene_seconds` [20] | How long each scene shows. 5 or more. |
 | `clock` [the language's usual clock: `24h` in Italian, German, Turkish, French and Serbian, `12h` in the others] | `12h` (5:30 pm) or `24h` (17:30). |
+| `idle_photo_seconds` [`0`] | `0` leaves rows on. `5`, `10`, `15`, `30` or `60` fades out the app dock, Keep watching and profile controls after that many seconds without input. The clock, weather and background scenes stay visible. Any remote button wakes the rows without opening the focused app. Home settings, Look, Hide rows when idle wins over it. |
 | `hide_packages` [none] | Android package names never shown on the home or in More apps, for a maker's own clutter (help apps, file browsers, screen sharing tools). `survey-tv.py` lists every TV app with its package name. For example `["com.example.tvhelp"]`. |
 | `updates` [none: the TV asks once] | The answer to "tell you when a new couch-tv version is out?", asked at setup: `notify` (the TV home looks on GitHub once a week and puts a dot on the gear tile) or `manual` (nothing by itself; Home settings, Updates, Check for updates now). Used only until the TV has an answer; after that the switch in Home settings, Updates wins. Option C has no updates. |
 | `glass` [`off`] | Glass panels behind the clock, Keep watching and the apps: `on` (clear, softly blurred, with a light edge), `lite` (the same panels with no blur, for older or slower TVs) or `off`. Home settings, Look, Glass panels wins over it. |
@@ -201,6 +200,7 @@ Home settings saves to the same `bridge/data/people.json` the phone uses.
 | `inputs` [none] | Pinned external inputs/consoles displayed as dock and grid tiles. They take dock places, so the last apps move behind More apps. Each item can specify `port` (e.g. `1` for HDMI 1), `label` or `name` (e.g. `"PS5"`), `icon` (`"ps5"`, `"xbox"`, `"switch"`, `"hdmi"`, `"cable"`, or `"pc"`), `match` (substring matched against TV input labels or IDs), or `id`. For example: `[{"port": 1, "label": "PlayStation 5", "icon": "ps5"}]`. |
 | `soundscape` [none] | The sound the Soundscape button starts with: `"rain"`, `"fire"`, `"waves"`, `"brown"`, or `"off"`, or an object `{"type": "rain", "volume": 0.5, "fade_with_sleep": true}` (`volume` 0 to 1). It never starts by itself: only a press on the button, or the row in Home settings, plays it. With `fade_with_sleep` it gets quieter over the last 15 minutes of a sleep timer and stops when it ends. |
 | `bedtime_dim` [`false`] | `true` dims the couch-tv home into a warm amber for the last 15 minutes of a sleep timer. It only darkens the couch-tv page, not an app that is playing, and not the TV's brightness or picture settings. |
+| `keep_watching` [`true`] | `false` hides the whole Keep watching row, heading and all: the layout closes the gap, the remote skips it and the home stops asking the bridge for it. A song still shows its Now playing card in the Night look. Home settings, Look, Show Keep watching wins over it. Works on the Android, LG, Samsung and Roku homes. |
 | `skip_watch_next` [none] | Package names never shown in the Keep watching row (e.g. `["com.google.android.youtube.tv"]`). |
 | `watch_next_per_app` [5] | The maximum number of Keep watching cards to show from any single app (1 to 20). |
 | `language` [the TV's own language if the home speaks it, else `en`] | The TV home's language until someone picks one in Home settings: `en` (English), `es` (Spanish), `es-MX` (Mexican Spanish), `it` (Italian), `de` (German), `tr` (Turkish), `fr` (French) or `sr-Latn-RS` (Serbian Latin). The phone remote has its own choice, "Same as the TV" by default. |

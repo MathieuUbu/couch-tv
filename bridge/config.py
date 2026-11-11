@@ -262,6 +262,9 @@ def _home(h):
         # your own scenes, in backgrounds/mine/ (docs/MAKE-A-SCENE.md)
         "my_scenes": mine,
     }
+    idle_photo_seconds = h.get("idle_photo_seconds")
+    if type(idle_photo_seconds) is int and idle_photo_seconds in (0, 5, 10, 15, 30, 60):
+        out["idle_photo_seconds"] = idle_photo_seconds
     # Only when config.json gives them. Without "language" the TV home speaks the TV's own language
     # (English if it is not one of LANGUAGES), and without "clock" it uses that language's usual
     # clock (24 hour in Italian, German, Turkish, French and Serbian, else 12 hour). Home settings on the TV win over both.
@@ -300,6 +303,9 @@ def _home(h):
     # Now playing on or off (#31), and the navigation sound: the TV's own, soft or off (#32)
     if isinstance(h.get("now_playing"), bool):
         out["now_playing"] = h["now_playing"]
+    # false hides the whole Keep watching row and stops the home asking for it. Home settings win over it.
+    if isinstance(h.get("keep_watching"), bool):
+        out["keep_watching"] = h["keep_watching"]
     if isinstance(h.get("ambient_music"), bool):
         out["ambient_music"] = h["ambient_music"]
     if isinstance(h.get("sun_sync"), bool):

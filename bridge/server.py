@@ -1570,6 +1570,9 @@ def clean_settings(s):
         out["wx_every"] = s["wx_every"]
     if s.get("look") in ("night", "oled", "classic"):
         out["look"] = s["look"]
+    idle_photo_seconds = s.get("idle_photo_seconds")
+    if type(idle_photo_seconds) is int and idle_photo_seconds in (0, 5, 10, 15, 30, 60):
+        out["idle_photo_seconds"] = idle_photo_seconds
     if s.get("glass") in ("off", "on", "lite"):
         out["glass"] = s["glass"]
     if isinstance(s.get("glass_icons"), bool):
@@ -1585,6 +1588,8 @@ def clean_settings(s):
     # Now playing on or off (#31), and the navigation sound: the TV's own, soft or off (#32)
     if isinstance(s.get("now_playing"), bool):
         out["now_playing"] = s["now_playing"]
+    if isinstance(s.get("keep_watching"), bool):
+        out["keep_watching"] = s["keep_watching"]
     if isinstance(s.get("ambient_music"), bool):
         out["ambient_music"] = s["ambient_music"]
     if isinstance(s.get("sun_sync"), bool):

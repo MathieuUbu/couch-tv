@@ -9,12 +9,12 @@
   var MOCK = /[?&]mock\b/.test(Q);
   var PREVIEW = /[?&]preview\b/.test(Q);
   var API = decodeURIComponent((Q.match(/[?&]api=([^&]+)/) || [])[1] || "");
-  var KEY = decodeURIComponent((Q.match(/[?&]key=([^&]+)/) || [])[1] || "");
+  // the LG and Samsung apps build the key in rather than put it in the page's address, and theirs
+  // wins over a key an older build left in localStorage
+  var KEY = decodeURIComponent((Q.match(/[?&]key=([^&]+)/) || [])[1] || "") ||
+    (window.COUCH_WEBOS || window.COUCH_TIZEN || window.COUCH_SETTINGS || {}).key || "";
   if (KEY) { try { localStorage.setItem("couchtv.key", KEY); } catch (e) {} }
   else { try { KEY = localStorage.getItem("couchtv.key") || ""; } catch (e) {} }
-  if (!KEY && window.COUCH_SETTINGS && window.COUCH_SETTINGS.key) {
-    KEY = window.COUCH_SETTINGS.key;
-  }
   // which TV this page is on (the launcher adds ?tv=<id> on any TV that is not the default); none = living room
   var TV_ID = (Q.match(/[?&]tv=([a-z-]+)/) || [])[1] || "";
   // The launcher's saved copy of this page, opened when the computer is off (or when there is no
@@ -59,9 +59,11 @@
   // Home settings made on this TV with the gear tile (see "home settings" below). They win over
   // config.js. ST is the saved object; the rest are read from it in readConfig().
   var ST = {}, WX_SHOW = true, WX_F = false, WX_EVERY = 30, HIDDEN_TV = [];
+  var IDLE_PHOTO_STEPS = [0, 5, 10, 15, 30, 60];
+  var IDLE_PHOTO_SECONDS = 0, idlePhotoTimer = null, idlePhotoActive = false;
   var WX_AMBIENT = true, WX_SUN_GRADE = true;
   // Now playing (#31), on unless switched off; the navigation sound: system, soft or off (#32)
-  var NP_ON = true, SOUND_STYLE = "system";
+  var NP_ON = true, KW_ON = true, SOUND_STYLE = "system";
   // Ambient sleep soundscapes (rain, fire, waves, brown noise)
   var SOUND_TYPE = "off", SOUND_VOL = 0.5, SOUND_FADE_SLEEP = true;
   function initSoundscape() {
@@ -255,6 +257,42 @@
   var lift = null;                   // the dock app picked up to move: {pkg}
   var newApps = [];                  // apps installed since this TV first saw its apps, until opened once
 
+  // Optional clean photo display: after the chosen delay without input, fade out the home rows while
+  // leaving the clock, date/weather and rotating scene visible. The first remote input wakes the
+  // rows without activating the focused app.
+  function idlePhotoAllowed() {
+    return IDLE_PHOTO_SECONDS > 0 && !document.hidden && !screenOffActive && !expanded && !lift &&
+      ["grid", "shelf", "people", "quick", "np"].indexOf(zone) >= 0;
+  }
+  function resetIdlePhoto() {
+    clearTimeout(idlePhotoTimer);
+    idlePhotoTimer = null;
+    idlePhotoActive = false;
+    document.documentElement.classList.remove("idle-photo");
+    if (!idlePhotoAllowed()) return;
+    idlePhotoTimer = setTimeout(function () {
+      idlePhotoTimer = null;
+      if (!idlePhotoAllowed()) return;
+      idlePhotoActive = true;
+      document.documentElement.classList.add("idle-photo");
+    }, IDLE_PHOTO_SECONDS * 1000);
+  }
+  function idlePhotoInput(e) {
+    // a dialog or screen that came forward while the rows were hidden gets its key straight away
+    var wakeOnly = idlePhotoActive && idlePhotoAllowed();
+    resetIdlePhoto();
+    if (wakeOnly && e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    return wakeOnly;
+  }
+  document.addEventListener("pointerdown", function (e) { idlePhotoInput(e); }, true);
+  document.addEventListener("pointermove", function (e) {
+    if (e.movementX || e.movementY) idlePhotoInput(e);
+  }, true);
+  document.addEventListener("touchstart", function (e) { idlePhotoInput(e); }, { capture: true, passive: false });
+
   function setPeople(list) {
     PEOPLE = (list || []).filter(function (p) { return p && p.id && p.name; });
     NOBODY = !PEOPLE.length;
@@ -279,6 +317,10 @@
     HOME = CFG.home || {};
     ON_TV = CFG.mode === "on-tv";
     ST = loadSettings();
+    var savedIdle = ST.idle_photo_seconds;
+    var configuredIdle = HOME.idle_photo_seconds;
+    IDLE_PHOTO_SECONDS = IDLE_PHOTO_STEPS.indexOf(savedIdle) >= 0 ? savedIdle :
+      (IDLE_PHOTO_STEPS.indexOf(configuredIdle) >= 0 ? configuredIdle : 0);
     // the language: Home settings, then config.json, then the TV's own language if the home speaks it
     if (window.I18N) window.I18N.set(ST.lang || HOME.language || window.I18N.device());
     if (CFG.weather) WXCFG = CFG.weather;
@@ -312,6 +354,9 @@
     // glass app icons (#25): set in Home settings, else home.glass_icons; off unless switched on
     GLASS_ICONS = typeof ST.glass_icons === "boolean" ? ST.glass_icons : HOME.glass_icons === true;
     NP_ON = typeof ST.now_playing === "boolean" ? ST.now_playing : HOME.now_playing !== false;
+    // the Keep watching row: Home settings win over home.keep_watching; off hides it and stops fetching it
+    KW_ON = typeof ST.keep_watching === "boolean" ? ST.keep_watching : HOME.keep_watching !== false;
+    document.documentElement.classList.toggle("kw-off", !KW_ON);
     // the full screen music view is off until it is switched on in Home settings or home.ambient_music
     AMBIENT_MUSIC = typeof ST.ambient_music === "boolean" ? ST.ambient_music : HOME.ambient_music === true;
     GLASS_FOCUS = (ST.glass_focus || HOME.glass_focus) === "glass" ? "glass" : "colour";
@@ -549,7 +594,7 @@
   ];
   var BUILT_IN = SCENE_LIB.slice();   // readConfig() adds your own scenes to SCENE_LIB
   var SCENES = SCENE_LIB.slice(), SCENE_MS = 20000, SUN_SYNC = false;
-  var scene = 0, sceneEls = [], glassShown = "";
+  var scene = 0, sceneEls = [], glassShown = "", lastKeyAt = 0;
 
   // Your own scenes (home.my_scenes in config.json), made with tools/make-scene.py: the photo, glass
   // copy and cut-out in backgrounds/mine/, and how its clock looks. Anything odd falls back to the
@@ -657,6 +702,8 @@
       el.querySelector(".sbg").src = s.src || bgPath(s.photo, ".jpg", !s.mine);
       if (s.fg) el.querySelector(".fg").src = bgPath(s.photo + "-fg", ".webp", !s.mine);
       el.classList.add("ready");
+      // decoded now, while the scene waits at opacity 0, rather than when its fade starts
+      Array.prototype.forEach.call(el.querySelectorAll("img"), function (img) { if (img.decode && img.src) img.decode().catch(function () {}); });
     }
     drawClocks(el, s, glassShown);
   }
@@ -726,7 +773,10 @@
     try { v.load(); } catch (e) {}
   }
   function pauseVideo() { stopSoundscape(); if (window.AmbientWeather) window.AmbientWeather.pause(); var v = $("bgvid"); if (v.getAttribute("src")) v.pause(); }
-  document.addEventListener("visibilitychange", function () { if (document.hidden) pauseVideo(); else { startVideo(); if (window.AmbientWeather) window.AmbientWeather.resume(); } });
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) pauseVideo();
+    else { startVideo(); if (window.AmbientWeather) window.AmbientWeather.resume(); resetIdlePhoto(); }
+  });
 
   function showScene(i) {
     var prev = scene;
@@ -826,9 +876,24 @@
       : pick("water", ["fog", "golden", "dawn", "night"]);
   }
 
+  // Whether a scene may change now. A change costs a weak TV a visible stall (430 ms on an LG
+  // OLED55A2), so it should not land while someone is moving along the rows. lastKeyAt is
+  // Date.now() at the last key press (0 before any). A false here is not lost: the 20 s rotation
+  // and the clock tick (sun_sync) both ask again on their next turn.
+  var sceneHeldSince = 0;
+  function sceneMayChange() {
+    var now = Date.now();
+    if (now - lastKeyAt < 4000) {
+      sceneHeldSince = sceneHeldSince || now;
+      if (now - sceneHeldSince < 60000) return false;   // a minute of browsing still gets the next scene
+    }
+    sceneHeldSince = 0;
+    return true;
+  }
+
   function applySunSync() {
     // the clock ticks before buildScenes() has made the scenes: wait for them (sun_sync on in config.json)
-    if (!NIGHT || !SUN_SYNC || !SCENES.length || sceneEls.length !== SCENES.length) return;
+    if (!NIGHT || !SUN_SYNC || !SCENES.length || sceneEls.length !== SCENES.length || !sceneMayChange()) return;
     var targetId = sunTargetScene();
     var idx = SCENES.map(function (s) { return s.id; }).indexOf(targetId);
     if (idx >= 0 && idx !== scene) {
@@ -838,7 +903,7 @@
 
   // the settings screen covers the scenes, so they wait (one less thing for a small TV stick to draw)
   function nextScene() {
-    if (zone !== "settings") {
+    if (zone !== "settings" && sceneMayChange()) {
       if (SUN_SYNC) applySunSync();
       else showScene(nextFrom(scene));
     }
@@ -1089,7 +1154,7 @@
     el.classList.toggle("on", on);
     if (NIGHT) {
       // the row shows while someone has a show on the go, or while a song plays
-      var anyone = PEOPLE.some(function (p) { return (data.showsBy[p.id] || []).length; });
+      var anyone = KW_ON && PEOPLE.some(function (p) { return (data.showsBy[p.id] || []).length; });
       $("shelf-section").classList.toggle("empty", !anyone && !on);
       $("np-slot").classList.toggle("on", on);
     }
@@ -1369,6 +1434,7 @@
       try { if (TV && TV.setScreenOff) TV.setScreenOff(false); } catch (e) {}
       paintFocus();
     }
+    resetIdlePhoto();
   }
   // The TV's own input list (HDMI, a console, a set top box): the TV_INPUT key through the bridge,
   // or straight from the launcher when there is no bridge (only where the TV has such a screen).
@@ -1602,13 +1668,14 @@
   var KEEP_MAX = 10;
   function renderShelf() {
     var track = $("shelf");
-    data.shows = (data.showsBy[who] || []).slice(0, KEEP_MAX);
-    var anyone = PEOPLE.some(function (p) { return (data.showsBy[p.id] || []).length; });
+    data.shows = KW_ON ? (data.showsBy[who] || []).slice(0, KEEP_MAX) : [];
+    var anyone = KW_ON && PEOPLE.some(function (p) { return (data.showsBy[p.id] || []).length; });
     // nobody has anything on the go: no empty box, the photo has the space (unless Now playing
     // is up at night). The people switcher stays: with nothing yet (Netflix tells Android nothing on
     // some TVs, issue #23) it is the only way to say who is watching before anything is played.
     $("shelf-section").classList.toggle("empty", !anyone && !(NIGHT && npVisible()));
     renderPeople();
+    if (!KW_ON) { track.innerHTML = ""; shelfEls = []; return; }   // row switched off: nothing to draw, the section is closed up
     if (!data.shows.length) {
       var name = PEOPLE[whoIndex()].name;
       track.innerHTML = '<p class="shelf-none">' + esc(peopleCount() < 2 ? t("nothing_yet") : t("nothing_for", { name: name })) + "</p>";
@@ -2629,6 +2696,7 @@
     if (window.AmbientWeather) window.AmbientWeather.resume();
     if (SET.dirty) { SET.dirty = false; restart(); return; }
     paintFocus();
+    resetIdlePhoto();
   }
 
   // ---- rows ----
@@ -2826,6 +2894,12 @@
     rows.push({ kind: "cycle", key: "clock", label: t("clock"), value: CLOCK24 ? t("clock_24") : t("clock_12"), act: function () {
       CLOCK24 = !CLOCK24; ST.clock = CLOCK24 ? "24h" : "12h"; saveSettings(); glassShown = ""; clock();
     } });
+    rows.push({ kind: "cycle", key: "idle-photo-seconds", label: t("idle_photo"), sub: t("idle_photo_sub"),
+      value: IDLE_PHOTO_SECONDS ? t("n_secs", { n: IDLE_PHOTO_SECONDS }) : t("off"), act: function () {
+        var i = IDLE_PHOTO_STEPS.indexOf(IDLE_PHOTO_SECONDS);
+        IDLE_PHOTO_SECONDS = IDLE_PHOTO_STEPS[(i + 1) % IDLE_PHOTO_STEPS.length];
+        ST.idle_photo_seconds = IDLE_PHOTO_SECONDS; saveSettings(); resetIdlePhoto();
+      } });
     // the TV's own screensaver (Google TV's Ambient mode) and the albums it shows
     rows.push(head(t("ambient_head")));
     rows.push({ kind: "action", key: "ambient", label: t("ambient_settings"), sub: t("ambient_settings_sub"),
@@ -2869,6 +2943,13 @@
       MOVING = !MOVING; ST.moving_tiles = MOVING; saveSettings(); movingTiles();
     } });
     // a slow box (#58): no blur, no soft shadows, a still photo and smaller pictures, all in one switch
+    // the whole Keep watching row, heading and all (home.keep_watching): off closes the gap and stops fetching it
+    rows.push({ kind: "toggle", key: "keep-watching", label: t("keep_show"), value: KW_ON ? t("on") : t("off"), act: function () {
+      KW_ON = !KW_ON; ST.keep_watching = KW_ON; saveSettings();
+      document.documentElement.classList.toggle("kw-off", !KW_ON);
+      if (!KW_ON) { data.shows = []; shelfEls = []; s = 0; }
+      renderShelf(); renderNp();
+    } });
     rows.push({ kind: "toggle", key: "lighter", label: t("lighter"), value: LIGHTER ? t("on") : t("off"), act: function () {
       LIGHTER = !LIGHTER; ST.lighter = LIGHTER; saveSettings();
       document.documentElement.classList.toggle("lighter", LIGHTER); ambientSync(); movingTiles(); renderShelf(); paintFocus();
@@ -3635,6 +3716,7 @@
   // couch-tv has no system home behind it, so it opens couch-tv's own gear menu, like the gear tile.
   function isSettings(e) { return e.key === "Settings" || e.key === "TvSettings" || e.keyCode === 176; }
   function settingsKey() {
+    if (idlePhotoInput(null)) return;
     if (zone === "gear" || zone === "settings" || zone === "smart" || zone === "appmenu" || zone === "shelfmenu" || zone === "updask" || zone === "inputs") { goHome(); return; }
     openGear();
   }
@@ -3772,23 +3854,26 @@
       pointTo(p, true);
       if (p.zone === "settings" && p.sec !== undefined) return;   // choosing a section is the whole click
       activate();
+      resetIdlePhoto();
     });
   }
 
   document.addEventListener("keydown", function (e) {
+    lastKeyAt = Date.now();
     if (screenOffActive) {
       e.preventDefault();
       e.stopPropagation();
       toggleScreenOff(false);
       return;
     }
+    if (idlePhotoInput(e)) return;
     if (typingKey(e)) return;   // typing a place or a name: the keys belong to the text box
     if (isOk(e)) {
       e.preventDefault();
       if (e.repeat || okDown) return;   // a held key repeating: the timer is already running
       okDown = true; okHeld = false;
       blip(0, 0);
-      okTimer = setTimeout(function () { okHeld = true; if (!hold()) activate(); ensureFocus(); }, HOLD_MS);
+      okTimer = setTimeout(function () { okHeld = true; if (!hold()) activate(); ensureFocus(); resetIdlePhoto(); }, HOLD_MS);
       return;
     }
     var arrow = arrowOf(e);
@@ -3799,6 +3884,7 @@
     else { ensureFocus(); return; }                   // anything else is not ours: Android gets it
     e.preventDefault();
     ensureFocus();
+    resetIdlePhoto();
   });
   document.addEventListener("keyup", function (e) {
     if (screenOffActive) {
@@ -3813,6 +3899,7 @@
     okReset();
     if (!held) activate();
     ensureFocus();
+    resetIdlePhoto();
   });
   window.addEventListener("blur", okReset);
 
@@ -3890,7 +3977,7 @@
       else if (window.MOCK_APPS) data.apps = sortApps(window.MOCK_APPS.slice());
       data.bridge = false;
       // Keep watching with no computer: Android's own Watch Next list, the same for everyone in the house
-      if (TV && TV.watchNext) {
+      if (TV && TV.watchNext && KW_ON) {
         var wn = [];
         try { wn = JSON.parse(TV.watchNext()) || []; } catch (e) {}
         var skipPkgs = (window.COUCH_CONFIG && window.COUCH_CONFIG.home && window.COUCH_CONFIG.home.skip_watch_next) || [];
@@ -3917,6 +4004,7 @@
     }, function () {});
     var jobs = [
       people.then(function () {
+        if (!KW_ON) return null;   // Keep watching is off: no calls for it
         return Promise.all(PEOPLE.map(function (p) {
           return api("GET", "/api/continue?who=" + p.id, null, 9000).then(function (j) {
             var dismissed = kept("tvhome.dismissed_shows") || [];
@@ -3942,7 +4030,7 @@
       syncSettings(),
       // Android's Watch Next rows: this app may read them, the bridge's ADB may not. They name a
       // play an app gave no title for (Netflix sends none, Prime only its own name, issue #23).
-      sendWatchNext()
+      KW_ON ? sendWatchNext() : Promise.resolve()
     ];
     return Promise.all(jobs.map(function (p) { return p.then(function () { return true; }, function () { return false; }); }))
       .then(function (ok) {
@@ -3969,14 +4057,15 @@
 
   // the native side calls these
   // Home on the remote also re-reads the lists, so an order arranged on the phone shows straight away
-  window.tv = { back: goHome, home: function () { if (zone === "settings") closeSettings(); else goHome(); refresh(); },
+  window.tv = { back: function () { if (idlePhotoInput(null)) return; goHome(); resetIdlePhoto(); },
+    home: function () { if (idlePhotoInput(null)) return; if (zone === "settings") closeSettings(); else goHome(); refresh(); resetIdlePhoto(); },
     screenOff: function () { toggleScreenOff(true); },
     wakeScreen: function () { toggleScreenOff(false); },
     isScreenOff: function () { return screenOffActive; },
     noDream: function () { note(t("no_dream")); },
     // the remote's Settings/gear key, caught by the launcher natively (MainActivity.dispatchKeyEvent)
     settingsKey: function () { blip(0, 0); settingsKey(); },
-    resume: function () { toggleScreenOff(false); okReset(); refresh(); if (!OFFLINE) refreshQuick(); refreshWeather(); startVideo(); refreshMusic(); if (window.AmbientWeather) window.AmbientWeather.resume(); },
+    resume: function () { toggleScreenOff(false); okReset(); refresh(); if (!OFFLINE) refreshQuick(); refreshWeather(); startVideo(); refreshMusic(); if (window.AmbientWeather) window.AmbientWeather.resume(); resetIdlePhoto(); },
     // an app is in front: the video background stops until the home is back
     pause: pauseVideo,
     // the launcher's file picker has copied the chosen photos into its own storage (Home settings)
@@ -4060,6 +4149,7 @@
       return api("POST", "/api/who", { who: who });
     }).catch(function () {});
     hello.then(refresh).then(function () { mark("home-painted-live"); updTell(); updAsk(); homeAsk(); });
+    resetIdlePhoto();
   }
 
   if (MOCK || PREVIEW) {

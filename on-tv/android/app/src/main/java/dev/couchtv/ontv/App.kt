@@ -144,6 +144,7 @@ class BridgeService : Service() {
         wifiLock = runCatching { wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "couchtv").apply { acquire() } }.getOrNull()
         multicast = runCatching { wm.createMulticastLock("couchtv-mdns").apply { setReferenceCounted(false); acquire() } }.getOrNull()
         startServer()
+        startWatchdog()
         Now.start()
         Thread {
             runCatching { if (Adb.everAllowed || Adb.paired) Adb.ensure() }
@@ -178,6 +179,44 @@ class BridgeService : Service() {
             server = Server(this, Store.port).also { it.start(fi.iki.elonen.NanoHTTPD.SOCKET_READ_TIMEOUT, false) }
             Log.i("couchtv", "server on port ${Store.port}")
         } catch (e: Exception) { Log.e("couchtv", "server failed to start", e) }
+    }
+
+    /**
+     * The server once stopped answering on a TCL Google TV a few minutes after a restart: its
+     * listening socket stayed open with a full backlog and every new connection sat unanswered, so the
+     * home lost its weather and Now playing card until the app was force-stopped (the process itself
+     * was alive). This thread asks the server for /api/health on the loopback every 30 s; after two
+     * misses in a row it logs what the NanoHTTPD threads were doing, closes the old server and starts a
+     * new one on the same port. stop() joins the listener thread, which may be the one stuck, so it
+     * runs on its own thread and is never waited for: the socket is closed first, so the new server can
+     * bind. Nothing else changes: pairing tokens, settings and ADB stay as they were.
+     */
+    private fun startWatchdog() {
+        Thread {
+            var misses = 0
+            while (true) {
+                try { Thread.sleep(30_000) } catch (e: InterruptedException) { return@Thread }
+                val ok = runCatching {
+                    val c = java.net.URL("http://127.0.0.1:${Store.port}/api/health").openConnection() as java.net.HttpURLConnection
+                    c.connectTimeout = 5_000; c.readTimeout = 5_000
+                    try { c.responseCode == 200 } finally { c.disconnect() }
+                }.getOrDefault(false)
+                if (ok) { misses = 0; continue }
+                if (++misses < 2) continue
+                Log.w("couchtv", "server on port ${Store.port} not answering twice in a row: restarting it")
+                runCatching {
+                    Thread.getAllStackTraces().filter { it.key.name.startsWith("NanoHttpd") }.forEach { (t, st) ->
+                        Log.w("couchtv", "  ${t.name} [${t.state}] " + st.take(6).joinToString(" < "))
+                    }
+                }
+                val old = server
+                server = null
+                Thread { runCatching { old?.stop() } }.apply { isDaemon = true }.start()
+                try { Thread.sleep(3_000) } catch (e: InterruptedException) { return@Thread }
+                startServer()
+                misses = 0
+            }
+        }.apply { isDaemon = true; name = "couchtv-watchdog" }.start()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int { startServer(); return START_STICKY }

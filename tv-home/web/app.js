@@ -2313,6 +2313,10 @@
       if (dx) {
         var nx = g + dx;
         if (nx >= 0 && nx < gridEls.length && Math.floor(nx / GRID_COLS) === row) g = nx;
+      } else if (dy < 0 && row === 0 && expanded && collapseGrid()) {
+        // Up from the top row of the full apps view folds it back into the dock, the mirror of the
+        // Down that opened it. Before, the focus went to the Keep watching row, which this view hides.
+        return;
       } else if (dy < 0 && row === 0) {
         if (cards.length) zone = "shelf";
         else if (npReach()) {
@@ -2376,18 +2380,26 @@
     if (zone === "pmenu") { if (plift) dropPeople(); else closePop(); paintFocus(); return; }
     if (zone === "menu") { closeMenu(); paintFocus(); return; }   // BACK just closes the sleep choices
     if (zone === "inputs") { closeInputMenu(); paintFocus(); return; }
-    if (expanded) {
-      expanded = false; renderGrid();
-      if (dockBack) {   // opened with Down from the dock: Back lands on that app in the dock again
-        var back = -1;
-        gridItems.forEach(function (x, i) { if (back < 0 && gridKey(x) === dockBack) back = i; });
-        dockBack = null;
-        if (back >= 0) { zone = "grid"; g = back; paintFocus(); return; }
-      }
-    }
+    if (expanded && collapseGrid()) return;
     dockBack = null;
     startFocus();
     paintFocus();
+  }
+
+  /**
+   * Folds the full apps view back into the dock (Back, or Up from its top row). Opened with Down
+   * from the dock, the focus lands on that same app in the dock again; opened from the More apps
+   * tile, on that tile. True when a tile was found, false when the caller should pick the focus.
+   */
+  function collapseGrid() {
+    var want = dockBack;
+    expanded = false; renderGrid();
+    dockBack = null;
+    var back = -1;
+    gridItems.forEach(function (x, i) { if (back < 0 && (want ? gridKey(x) === want : x.kind === "more")) back = i; });
+    if (back < 0) return false;
+    zone = "grid"; g = back; paintFocus();
+    return true;
   }
 
   // ---------------- actions ----------------
